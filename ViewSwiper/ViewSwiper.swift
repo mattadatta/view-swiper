@@ -12,7 +12,7 @@ import UIKit
 public final class ViewSwiper: NSObject {
 
     /// The `ViewSwipeable` instance that this `ViewSwiper` manages
-    public unowned let swipeable: ViewSwipeable
+    public private(set) weak var swipeable: ViewSwipeable?
 
     /// The delegate of this `ViewSwiper`
     public weak var delegate: ViewSwiperDelegate?
@@ -50,14 +50,20 @@ public final class ViewSwiper: NSObject {
     /// Enables the `ViewSwiper`. This will add the gesture recognizer to the trackable view.
     /// - seealso: `ViewSwipeable.swipeableTrackingView`
     private func enable() {
-        let trackingView = self.swipeable.swipeableTrackingView
+        guard let trackingView = self.swipeable?.swipeableTrackingView else {
+            self.isEnabled = false
+            return
+        }
         trackingView.addGestureRecognizer(self.panGestureRecognizer)
     }
 
     /// Disables the `ViewSwiper`. This will remove the gesture recognizer to the trackable view.
     /// - seealso: `ViewSwipeable.swipeableTrackingView`
     private func disable() {
-        let trackingView = self.swipeable.swipeableTrackingView
+        guard let trackingView = self.swipeable?.swipeableTrackingView else {
+            self.isEnabled = true
+            return
+        }
         trackingView.removeGestureRecognizer(self.panGestureRecognizer)
     }
 
@@ -90,7 +96,7 @@ public final class ViewSwiper: NSObject {
         public var side: Side
 
         /// The revealable view
-        public unowned let view: UIView
+        public weak var view: UIView?
     }
 
     /// A `DragInstance` keeps track of the frame-by-frame state of the user currently dragging and
@@ -175,8 +181,9 @@ public final class ViewSwiper: NSObject {
     ///   - fromState: The previous state of the `ViewSwiper`
     ///   - toState: The current state of the `ViewSwiper`
     private func transition(from fromState: State, to toState: State) {
-        let trackingView = self.swipeable.swipeableTrackingView
-        let draggableView = self.swipeable.swipeableDragView
+        guard
+            let trackingView = self.swipeable?.swipeableTrackingView,
+            let draggableView = self.swipeable?.swipeableDragView else { return }
 
         switch (fromState, toState) {
         case (_, .start):
@@ -195,9 +202,9 @@ public final class ViewSwiper: NSObject {
             let xTranslate: CGFloat
             let percentage: CGFloat?
 
-            if let revealableWidth = self.swipeable.revealedViewWidth(for: instance.viewInstance.side) {
+            if let swipeable = self.swipeable, let revealableWidth = swipeable.revealedViewWidth(for: instance.viewInstance.side) {
                 let percentageRevealed = absoluteTranslation / revealableWidth
-                if percentageRevealed > 1.0 && !self.swipeable.dragInstanceCanPassEdge(instance) {
+                if percentageRevealed > 1.0 && !swipeable.dragInstanceCanPassEdge(instance) {
                     // Dampen pull after 100% if we can't continue pulling
                     xTranslate = (revealableWidth * unit) + ((absoluteTranslation - revealableWidth) * unit * 0.3)
                 } else {
@@ -210,7 +217,7 @@ public final class ViewSwiper: NSObject {
             }
 
             draggableView.transform = CGAffineTransform.identity.translatedBy(x: xTranslate, y: 0)
-            self.swipeable.didDrag(instance.viewInstance, translation: xTranslate, percentage: percentage)
+            self.swipeable?.didDrag(instance.viewInstance, translation: xTranslate, percentage: percentage)
 
         case (_, .open(let dragInstance, let width)):
             trackingView.isUserInteractionEnabled = false
@@ -220,7 +227,7 @@ public final class ViewSwiper: NSObject {
 
             let animBlock = {
                 draggableView.transform = CGAffineTransform.identity.translatedBy(x: xTranslate, y: 0)
-                self.swipeable.didDrag(dragInstance.viewInstance, translation: xTranslate, percentage: 1.0)
+                self.swipeable?.didDrag(dragInstance.viewInstance, translation: xTranslate, percentage: 1.0)
             }
 
             let completion: (Bool) -> Void = { _ in
@@ -244,12 +251,12 @@ public final class ViewSwiper: NSObject {
 
             let animBlock = {
                 draggableView.transform = .identity
-                self.swipeable.didDrag(dragInstance.viewInstance, translation: 0.0, percentage: 0.0)
+                self.swipeable?.didDrag(dragInstance.viewInstance, translation: 0.0, percentage: 0.0)
             }
 
             let completion: (Bool) -> Void = { [weak self] _ in
                 DispatchQueue.main.async {
-                    dragInstance.viewInstance.view.removeFromSuperview()
+                    dragInstance.viewInstance.view?.removeFromSuperview()
                     self?.state = .start
                     callback?()
                 }
@@ -270,17 +277,17 @@ public final class ViewSwiper: NSObject {
         case (_, .completing(let dragInstance, let callback)):
             trackingView.isUserInteractionEnabled = false // Will be set back to true when it's in the `start` state again
 
-            let xTranslate = dragInstance.viewInstance.view.frame.width * dragInstance.viewInstance.side.unit
+            let xTranslate = (dragInstance.viewInstance.view?.frame.width ?? 0) * dragInstance.viewInstance.side.unit
 
             let animBlock = {
                 draggableView.transform = CGAffineTransform.identity.translatedBy(x: xTranslate, y: 0)
-                self.swipeable.didDrag(dragInstance.viewInstance, translation: xTranslate, percentage: nil)
+                self.swipeable?.didDrag(dragInstance.viewInstance, translation: xTranslate, percentage: nil)
             }
 
             let completion: (Bool) -> Void = { [weak self] _ in
-                self?.swipeable.finishCompletion(for: dragInstance) {
+                self?.swipeable?.finishCompletion(for: dragInstance) {
                     DispatchQueue.main.async {
-                        dragInstance.viewInstance.view.removeFromSuperview()
+                        dragInstance.viewInstance.view?.removeFromSuperview()
                         self?.state = .start
                         callback?()
                     }
@@ -300,7 +307,7 @@ public final class ViewSwiper: NSObject {
             }
         }
 
-        self.swipeable.swiperDidTransition(from: fromState, to: toState)
+        self.swipeable?.swiperDidTransition(from: fromState, to: toState)
     }
 
 
@@ -314,7 +321,7 @@ public final class ViewSwiper: NSObject {
     ///
     /// - Parameter gestureRecognizer: The pan gesture recognizer
     private dynamic func handlePan(_ gestureRecognizer: UIPanGestureRecognizer) {
-        let trackingView = self.swipeable.swipeableTrackingView
+        guard let trackingView = self.swipeable?.swipeableTrackingView else { return }
 
         switch gestureRecognizer.state {
 
@@ -324,12 +331,13 @@ public final class ViewSwiper: NSObject {
             let newSide: Side = translationVector.dx > 0 ? .left : .right
 
             let createNewViewInstance: (RevealedViewInstance?) -> RevealedViewInstance? = { existingInstance in
-                existingInstance?.view.removeFromSuperview()
+                existingInstance?.view?.removeFromSuperview()
 
                 guard self.delegate?.viewSwiper(self, shouldBeginRevealing: newSide) ?? true else { return nil }
-                guard let view = self.swipeable.revealedView(for: newSide) else { return nil }
+                guard let swipeable = self.swipeable else { return nil }
+                guard let view = swipeable.revealedView(for: newSide) else { return nil }
                 let viewInstance = RevealedViewInstance(side: newSide, view: view)
-                let containerView = self.swipeable.swipeableRevealedContainerView
+                let containerView = swipeable.swipeableRevealedContainerView
                 containerView.addAndConstrain(view)
                 containerView.layoutIfNeeded()
                 return viewInstance
@@ -363,14 +371,14 @@ public final class ViewSwiper: NSObject {
             switch self.state {
             case .dragging(let dragInstance):
 
-                let releaseAction = self.swipeable.releaseAction(for: dragInstance)
+                let releaseAction = self.swipeable?.releaseAction(for: dragInstance) ?? .close
 
                 switch releaseAction {
                 case .complete:
                     self.state = .completing(dragInstance, nil)
 
                 case .open:
-                    if let viewWidth = self.swipeable.revealedViewWidth(for: dragInstance.viewInstance.side) {
+                    if let viewWidth = self.swipeable?.revealedViewWidth(for: dragInstance.viewInstance.side) {
                         self.state = .open(dragInstance, viewWidth)
                     } else {
                         self.state = .completing(dragInstance, nil)
@@ -410,8 +418,7 @@ extension ViewSwiper: UIGestureRecognizerDelegate {
         let panGestureRecognizer = self.panGestureRecognizer!
         guard panGestureRecognizer == gestureRecognizer else { return true }
         guard self.delegate?.viewSwiperShouldBegin(self) ?? true else { return false }
-
-        let trackingView = self.swipeable.swipeableTrackingView
+        guard let trackingView = self.swipeable?.swipeableTrackingView else { return false }
         let translationVector = panGestureRecognizer.translation(in: trackingView).vector
         return abs(translationVector.dx) >= abs(translationVector.dy)
     }
